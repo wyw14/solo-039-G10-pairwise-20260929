@@ -15,6 +15,7 @@ import (
 	"github.com/wyw14/solo-039/internal/product"
 	"github.com/wyw14/solo-039/internal/reboiler"
 	"github.com/wyw14/solo-039/internal/reflux"
+	"github.com/wyw14/solo-039/internal/release"
 	"github.com/wyw14/solo-039/internal/relief"
 	"github.com/wyw14/solo-039/internal/utility"
 	"path/filepath"
@@ -52,6 +53,9 @@ type Plant struct {
 	Evidence          *analyzer.EvidenceCatalog
 	ReliefHistory     *relief.History
 	Incidents         *Incidents
+	InterlockLog      *interlock.DecisionLog
+	FeedEvidence      *FeedEvidence
+	Releases          *release.Registry
 	started           bool
 	lastError         string
 }
@@ -90,6 +94,9 @@ func NewPlant(dataDir string) *Plant {
 		Evidence:          analyzer.NewEvidenceCatalog(),
 		ReliefHistory:     relief.NewHistory(),
 		Incidents:         NewIncidents(),
+		InterlockLog:      interlock.NewDecisionLog(),
+		FeedEvidence:      NewFeedEvidence(),
+		Releases:          release.NewRegistry(),
 	}
 	plant.Reflux.Register("T-101", plant.RefluxState)
 	plant.Feed.Observe = plant.observeFeed
@@ -191,7 +198,9 @@ func (p *Plant) RouteProduct(target string) error {
 	}
 	_ = p.Evidence.Add(proof)
 	pressureProof := model.Proof{ID: uuid.New(), Revision: current.Revision, Source: "column-pressure", Digest: fmt.Sprintf("%.3f", p.Column.Snapshot().Pressure), Durable: true, Independent: true, At: time.Now().Unix()}
+	_ = p.Evidence.Add(pressureProof)
 	permit := p.Interlock.Evaluate([]model.Proof{proof, pressureProof}, model.Campaign{ID: current.ID, Revision: current.Revision, Phase: model.OnSpec, Epoch: current.Epoch, Fencing: current.Fencing})
+	p.InterlockLog.Record(permit, current.Revision.String(), time.Now().Unix())
 	if err := permit.Error(); err != nil {
 		return err
 	}
@@ -284,7 +293,7 @@ func (p *Plant) Status() map[string]any {
 	lastError := p.lastError
 	p.mu.RUnlock()
 	gradient, _ := p.Profile.Gradient()
-	return map[string]any{"started": started, "last_error": lastError, "campaign": p.Campaign.Snapshot(), "column": p.Column.Snapshot(), "reflux_used": p.Reflux.Used(), "products": p.ProductTargets(), "relief": p.Relief.State.Snapshot(), "feed_metrics": p.FeedMetrics.Snapshot(), "reflux_telemetry": p.RefluxTelemetry.Snapshot(), "reboiler_telemetry": p.ReboilerTelemetry.Snapshot(), "product_decisions": p.ProductAudit.Count(), "utility_used": p.UtilityLedger.Used(), "metrics": p.Metrics.Snapshot(), "campaign_changes": p.CampaignHistory.Count(), "profile_gradient": gradient, "profile_stable": p.Profile.Stable(40), "evidence_count": p.Evidence.Count(p.Campaign.Snapshot().Revision.String()), "relief_attempts": p.ReliefHistory.Count(), "open_incidents": p.Incidents.CountOpen(), "operational_audit": p.OperationalAudit()}
+	return map[string]any{"started": started, "last_error": lastError, "campaign": p.Campaign.Snapshot(), "column": p.Column.Snapshot(), "reflux_used": p.Reflux.Used(), "products": p.ProductTargets(), "relief": p.Relief.State.Snapshot(), "feed_metrics": p.FeedMetrics.Snapshot(), "reflux_telemetry": p.RefluxTelemetry.Snapshot(), "reboiler_telemetry": p.ReboilerTelemetry.Snapshot(), "product_decisions": p.ProductAudit.Count(), "utility_used": p.UtilityLedger.Used(), "metrics": p.Metrics.Snapshot(), "campaign_changes": p.CampaignHistory.Count(), "profile_gradient": gradient, "profile_stable": p.Profile.Stable(40), "evidence_count": p.Evidence.Count(p.Campaign.Snapshot().Revision.String()), "relief_attempts": p.ReliefHistory.Count(), "open_incidents": p.Incidents.CountOpen(), "operational_audit": p.OperationalAudit(), "release_revisions": len(p.Releases.Revisions()), "interlock_decisions": p.InterlockLog.Count(), "feed_evidence_changes": p.FeedEvidence.Count()}
 }
 
 func (p *Plant) record(kind, payload string) error {
@@ -300,6 +309,7 @@ func (p *Plant) record(kind, payload string) error {
 }
 
 func (p *Plant) observeFeed(value feed.Transition) {
+	p.FeedEvidence.Record(value)
 	payload := fmt.Sprintf("%s:%s:%t:%.2f:%s:%t", value.Stage, value.OldSource, value.OldOpen, value.OldFlow, value.NewSource, value.NewOpen)
 	if err := p.record("feed.transition", payload); err != nil {
 		p.fail(err)

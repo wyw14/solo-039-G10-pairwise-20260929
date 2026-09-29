@@ -15,6 +15,12 @@ type Server struct {
 func NewServer() *Server {
 	plant := service.NewPlant("data")
 	_ = plant.Restore()
+	return NewServerWith(plant)
+}
+
+// NewServerWith wires a server around an existing plant, e.g. a temp-dir plant
+// in tests or one restored from a chosen data directory.
+func NewServerWith(plant *service.Plant) *Server {
 	s := &Server{runtime: service.NewRuntime("baseline"), plant: plant, router: chi.NewRouter()}
 	s.routes()
 	return s

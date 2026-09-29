@@ -3,16 +3,20 @@ package feed
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"github.com/wyw14/solo-039/internal/model"
 )
 
 type Transition struct {
-	Stage     string
-	OldSource string
-	OldOpen   bool
-	OldFlow   float64
-	NewSource string
-	NewOpen   bool
+	Stage            string
+	CampaignRevision uuid.UUID
+	OldSource        string
+	OldOpen          bool
+	OldFlow          float64
+	NewSource        string
+	NewOpen          bool
+	OldRevision      uuid.UUID
+	NewRevision      uuid.UUID
 }
 
 type Coordinator struct {
@@ -29,7 +33,7 @@ func (c *Coordinator) Switch(ctx context.Context, source string, campaign model.
 		if err := old.Close(ctx); err != nil {
 			return err
 		}
-		c.emit("old-isolated", old, nil)
+		c.emit("old-isolated", old, nil, campaign)
 	}
 	c.Previous = old
 	c.Current = &Route{}
@@ -37,23 +41,25 @@ func (c *Coordinator) Switch(ctx context.Context, source string, campaign model.
 	if err := c.Current.Activate(); err != nil {
 		return err
 	}
-	c.emit("new-active", old, c.Current)
+	c.emit("new-active", old, c.Current, campaign)
 	return nil
 }
 
-func (c *Coordinator) emit(stage string, old, next *Route) {
+func (c *Coordinator) emit(stage string, old, next *Route, campaign model.Campaign) {
 	if c.Observe == nil {
 		return
 	}
-	value := Transition{Stage: stage}
+	value := Transition{Stage: stage, CampaignRevision: campaign.Revision}
 	if old != nil {
 		value.OldSource = old.Source
 		value.OldOpen = old.Open
 		value.OldFlow = old.Flow
+		value.OldRevision = old.Revision
 	}
 	if next != nil {
 		value.NewSource = next.Source
 		value.NewOpen = next.Open
+		value.NewRevision = next.Revision
 	}
 	c.Observe(value)
 }
