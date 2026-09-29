@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+)
 
 func (s *Server) routes() {
 	s.router.MethodNotAllowed(methodNotAllowed)
@@ -21,6 +25,16 @@ func (s *Server) routes() {
 	s.router.Get("/api/recovery", s.recovery)
 	s.router.Get("/api/profile", s.profile)
 	s.router.Get("/api/metrics", s.metrics)
+
+	s.router.Route("/api/release", func(r chi.Router) {
+		r.Get("/packages", s.releasePackages)
+		r.Post("/packages", s.assembleReleasePackage)
+		r.Get("/packages/latest", s.latestReleasePackage)
+		r.Get("/packages/versions/{version}", s.releasePackageByVersion)
+		r.Get("/packages/{id}", s.releasePackageByID)
+		r.Post("/resupplement", s.resupplementRelease)
+		r.Post("/revoke", s.revokeRelease)
+	})
 }
 
 func (s *Server) interlocks(w http.ResponseWriter, r *http.Request) {
